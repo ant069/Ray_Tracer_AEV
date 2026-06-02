@@ -345,9 +345,9 @@ public class App_Scene1 {
         ObjModel car = ObjReader.parse(objPath);
         car.printSummary();
 
-        // Texture directories (two folders: textures/ and source/FINAL_MODEL_3/)
-        String TEX     = "c:/Users/aenri/Downloads/2019-mclaren-senna/textures/";
-        String TEX_SRC = "c:/Users/aenri/Downloads/2019-mclaren-senna/source/FINAL_MODEL_3/";
+        // Texture directories — relative to the src/ working directory
+        String TEX     = "../textures/";
+        String TEX_SRC = "../textures/source/";
 
         // Material map keyed by OBJ group name (usemtl)
         java.util.Map<String, Material> carMats = new java.util.HashMap<>();
