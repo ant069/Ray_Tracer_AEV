@@ -1,0 +1,13 @@
+# Compiled Java bytecode
+*.class
+
+# Python virtual environment
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.idea/
+*.iml

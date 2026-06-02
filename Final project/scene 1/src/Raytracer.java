@@ -1,15 +1,18 @@
 import java.awt.Color;
 import java.awt.image.BufferedImage;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Raytracer v0.9 – Ray tracing recursivo
+ * Raytracer v1.0 – Recursive ray tracer with parallel rendering.
  *
- * Características:
- *   - Phong shading con iluminación
- *   - Sombras duras
- *   - Reflexiones especulares (≥2 bounces)
- *   - Refracciones con Ley de Snell
- *   - Límite de profundidad recursiva
+ * Features:
+ *   - Blinn-Phong shading with lighting
+ *   - Hard shadows
+ *   - Specular reflections (multiple bounces)
+ *   - Refractions with Snell's Law
+ *   - Anti-aliasing 2x2 supersampling
+ *   - Multi-threaded rendering (one thread per scanline)
  */
 public class Raytracer {
     private final Scene       scene;
@@ -21,68 +24,89 @@ public class Raytracer {
     public Raytracer(Scene scene, Camera camera, int maxBounces) {
         this.scene      = scene;
         this.camera     = camera;
-        // Allow 1 bounce for very fast preview renders
         this.maxBounces = Math.max(1, maxBounces);
         this.epsilon    = 1e-4;
-        // Increase ambient term slightly to avoid very dark images in preview renders
-        // (Makes scene more visible when reflections/refractivity lead to dark results)
-        this.shader     = new PhongShader(0.18, 0.5, 32);
+        this.shader     = new PhongShader(0.08, 0.40, 32);
     }
 
     public Raytracer(Scene scene, Camera camera) {
-        this(scene, camera, 4);  // Default: 4 bounces
+        this(scene, camera, 4);
     }
 
     public BufferedImage render() {
         int w = camera.getWidth();
         int h = camera.getHeight();
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
 
         double tNear = camera.getTNear();
         double tFar  = camera.getTFar();
 
-        System.out.printf("[Raytracer] Renderizando %dx%d con hasta %d bounces...%n", 
-                          w, h, maxBounces);
-        long t0 = System.currentTimeMillis();
+        final int    AA     = 2;
+        final double invAA2 = 1.0 / (AA * AA);
+
+        // Warm up the BVH before launching threads so it is built on a single thread
+        scene.intersect(new Ray(camera.getPosition(), new Vector3D(0, -1, 0)), 0, 1e-6);
+
+        int numThreads = Runtime.getRuntime().availableProcessors();
+        System.out.printf("[Raytracer] Rendering %dx%d | %d bounces | %dx%d AA | %d threads%n",
+                          w, h, maxBounces, AA, AA, numThreads);
+
+        ExecutorService pool = Executors.newFixedThreadPool(numThreads);
+        CountDownLatch latch = new CountDownLatch(h);
+        AtomicInteger done   = new AtomicInteger(0);
 
         for (int y = 0; y < h; y++) {
-            if (y % 50 == 0)
-                System.out.printf("  Línea %d / %d%n", y, h);
-            for (int x = 0; x < w; x++) {
-                Ray ray = camera.getRay(x, y);
-                Color col = traceRay(ray, tNear, tFar, 0);
-                img.setRGB(x, y, col.getRGB());
-            }
+            final int row = y;
+            pool.submit(() -> {
+                for (int x = 0; x < w; x++) {
+                    double rAcc = 0, gAcc = 0, bAcc = 0;
+                    for (int sy = 0; sy < AA; sy++) {
+                        for (int sx = 0; sx < AA; sx++) {
+                            double px = x + (sx + 0.5) / AA;
+                            double py = row + (sy + 0.5) / AA;
+                            Ray   ray = camera.getRay(px, py);
+                            Color col = traceRay(ray, tNear, tFar, 0);
+                            rAcc += col.getRed();
+                            gAcc += col.getGreen();
+                            bAcc += col.getBlue();
+                        }
+                    }
+                    img.setRGB(x, row, new Color(
+                        clamp(rAcc * invAA2),
+                        clamp(gAcc * invAA2),
+                        clamp(bAcc * invAA2)
+                    ).getRGB());
+                }
+                int n = done.incrementAndGet();
+                if (n % 50 == 0 || n == h)
+                    System.out.printf("  Scanline %d / %d%n", n, h);
+                latch.countDown();
+            });
         }
 
-        long elapsed = System.currentTimeMillis() - t0;
-        System.out.printf("[Raytracer] Render completo en %.2f s%n", elapsed / 1000.0);
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        pool.shutdown();
+
         return img;
     }
 
-    /**
-     * Traza un rayo recursivamente, integrando iluminación, reflexión y refracción
-     */
     private Color traceRay(Ray ray, double tNear, double tFar, int depth) {
-        if (depth > maxBounces) {
-            return scene.getBackgroundColor();
-        }
+        if (depth > maxBounces) return scene.getBackgroundColor();
 
         Intersection hit = scene.intersect(ray, tNear, tFar);
         if (!hit.hit) return scene.getBackgroundColor();
 
         Material mat = hit.object.getMaterial();
-        Vector3D V = ray.direction.negate().normalize();  // dirección hacia cámara
+        Vector3D V   = ray.direction.negate().normalize();
 
-        // Base: iluminación Phong
         Color baseColor = shader.shade(hit, scene.getLights(), scene, ray.direction);
 
-        // Si es completamente opaco, devolver solo iluminación
-        if (mat.isOpaque()) {
-            return baseColor;
-        }
+        if (mat.isOpaque()) return baseColor;
 
-        // Inicializar color acumulado
         double r = baseColor.getRed()   / 255.0;
         double g = baseColor.getGreen() / 255.0;
         double b = baseColor.getBlue()  / 255.0;
@@ -90,104 +114,54 @@ public class Raytracer {
         double reflectivity = mat.getReflectivity();
         double refractivity = mat.getRefractivity();
 
-        // ── Reflexión ─────────────────────────────────────────────────────────
         if (reflectivity > 0.01) {
-            Ray reflectionRay = createReflectionRay(hit, V);
-            Color reflColor = traceRay(reflectionRay, epsilon, tFar, depth + 1);
-            double rf = reflColor.getRed()   / 255.0;
-            double gf = reflColor.getGreen() / 255.0;
-            double bf = reflColor.getBlue()  / 255.0;
-
-            r = lerp(r, rf, reflectivity);
-            g = lerp(g, gf, reflectivity);
-            b = lerp(b, bf, reflectivity);
+            Ray reflRay = reflectionRay(hit, V);
+            Color rc = traceRay(reflRay, epsilon, tFar, depth + 1);
+            r = lerp(r, rc.getRed()   / 255.0, reflectivity);
+            g = lerp(g, rc.getGreen() / 255.0, reflectivity);
+            b = lerp(b, rc.getBlue()  / 255.0, reflectivity);
         }
 
-        // ── Refracción ────────────────────────────────────────────────────────
         if (refractivity > 0.01) {
-            Ray refractionRay = createRefractionRay(hit, V, mat.getIOR());
-            if (refractionRay != null) {
-                Color refrColor = traceRay(refractionRay, epsilon, tFar, depth + 1);
-                double rf = refrColor.getRed()   / 255.0;
-                double gf = refrColor.getGreen() / 255.0;
-                double bf = refrColor.getBlue()  / 255.0;
-
-                r = lerp(r, rf, refractivity);
-                g = lerp(g, gf, refractivity);
-                b = lerp(b, bf, refractivity);
-            }
+            Ray refrRay = refractionRay(hit, V, mat.getIOR());
+            if (refrRay == null) refrRay = reflectionRay(hit, V); // TIR fallback
+            Color rc = traceRay(refrRay, epsilon, tFar, depth + 1);
+            r = lerp(r, rc.getRed()   / 255.0, refractivity);
+            g = lerp(g, rc.getGreen() / 255.0, refractivity);
+            b = lerp(b, rc.getBlue()  / 255.0, refractivity);
         }
 
-        return new Color(clamp(r), clamp(g), clamp(b));
+        return new Color(clamp(r * 255), clamp(g * 255), clamp(b * 255));
     }
 
-    /**
-     * Crea un rayo reflejado
-     * Fórmula: R = D - 2(D·N)N
-     */
-    private Ray createReflectionRay(Intersection hit, Vector3D V) {
+    private Ray reflectionRay(Intersection hit, Vector3D V) {
         Vector3D N = hit.normal;
         if (N.dot(V) < 0) N = N.negate();
-
         Vector3D D = V.negate();
         Vector3D R = D.subtract(N.multiply(2.0 * D.dot(N))).normalize();
-
-        // Pequeño offset para evitar auto-shadowing
-        Vector3D origin = hit.point.add(N.multiply(epsilon));
-        return new Ray(origin, R);
+        return new Ray(hit.point.add(N.multiply(epsilon)), R);
     }
 
-    /**
-     * Crea un rayo refractado usando Ley de Snell
-     * Determina automáticamente si entramos o salimos del material
-     */
-    private Ray createRefractionRay(Intersection hit, Vector3D V, double iorMaterial) {
-        Vector3D N = hit.normal;
-        double NdotV = N.dot(V);
-
-        // Determinar si estamos entrando o saliendo
+    private Ray refractionRay(Intersection hit, Vector3D V, double iorMat) {
+        Vector3D N    = hit.normal;
+        double NdotV  = N.dot(V);
         double iorIn, iorOut;
         Vector3D Nout;
 
         if (NdotV > 0) {
-            // Entrando al material
-            iorIn = 1.0;  // aire
-            iorOut = iorMaterial;
-            Nout = N;
+            iorIn = 1.0; iorOut = iorMat; Nout = N;
         } else {
-            // Saliendo del material
-            iorIn = iorMaterial;
-            iorOut = 1.0;  // aire
-            Nout = N.negate();
-            NdotV = -NdotV;
+            iorIn = iorMat; iorOut = 1.0; Nout = N.negate(); NdotV = -NdotV;
         }
 
-        double eta = iorIn / iorOut;
+        double eta  = iorIn / iorOut;
         double disc = 1.0 - eta * eta * (1.0 - NdotV * NdotV);
-
-        // Reflexión total interna
         if (disc < 0) return null;
 
-        double sqrtDisc = Math.sqrt(disc);
-        Vector3D T = V.multiply(eta).add(Nout.multiply(eta * NdotV - sqrtDisc)).normalize();
-
-        // Offset pequeño para evitar auto-intersection
-        Vector3D origin = hit.point.add(Nout.multiply(-epsilon));
-        return new Ray(origin, T);
+        Vector3D T = V.negate().multiply(eta).add(Nout.multiply(eta * NdotV - Math.sqrt(disc))).normalize();
+        return new Ray(hit.point.add(Nout.multiply(-epsilon)), T);
     }
 
-    /**
-     * Interpolación lineal entre dos valores
-     */
-    private static double lerp(double a, double b, double t) {
-        return a * (1.0 - t) + b * t;
-    }
-
-    /**
-     * Clamp a [0, 255]
-     */
-    private static int clamp(double v) {
-        return (int) Math.min(255, Math.max(0, v * 255));
-    }
+    private static double lerp(double a, double b, double t) { return a + t * (b - a); }
+    private static int clamp(double v) { return (int) Math.min(255, Math.max(0, v)); }
 }
-
