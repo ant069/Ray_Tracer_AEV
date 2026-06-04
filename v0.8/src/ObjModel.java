@@ -9,21 +9,15 @@ import java.util.*;
 public class ObjModel {
     private final List<Vector3D> vertices;
     private final List<Vector3D> normals;
-    private final List<double[]> texCoords;
-    private final List<int[]>    triV, triVN, triVT;
-    private final List<Integer>  triSG;
-
+    private final List<int[]>    triV, triVN;
     public ObjModel(List<Vector3D> vertices, List<Vector3D> normals,
                     List<double[]> texCoords,
                     List<int[]> triV, List<int[]> triVN, List<int[]> triVT,
                     List<Integer> triSG) {
         this.vertices  = vertices;
         this.normals   = normals;
-        this.texCoords = texCoords;
         this.triV      = triV;
         this.triVN     = triVN;
-        this.triVT     = triVT;
-        this.triSG     = triSG;
     }
 
     /**

@@ -25,10 +25,11 @@ public class App_Scene2 {
         System.out.printf( "|                    Resolution: %dx%d%n", width, height);
         System.out.println("+---------------------------------------------------------------+");
 
-        // Slightly elevated lateral-front view, shows the full profile
+        // Low-profile lateral-front view — eye level near the car's roofline,
+        // so the Batmobile reads as imposing and massive in the cave.
         Camera camera = new Camera(
-            new Vector3D(-1.0, 2.5, 6.5),
-            new Vector3D( 0.0, 0.5, 0.0),
+            new Vector3D(-1.2, 1.9, 6.5),
+            new Vector3D( 0.0, 0.8, 0.0),
             new Vector3D(0, 1, 0),
             60.0,
             width, height
@@ -137,19 +138,21 @@ public class App_Scene2 {
         quad(scene, new Vector3D( 1.5, 1.5, -9.5), new Vector3D( 3.9, 1.5, -9.5),
                     new Vector3D( 3.9, 2.9, -9.5), new Vector3D( 1.5, 2.9, -9.5), scrAmber);
 
-        // Point lights in front of each screen so they radiate light into the cave
-        scene.addLight(new PointLight(new Vector3D(-2.7, 2.2, -8.5), new Color( 20, 210,  90), 12));
-        scene.addLight(new PointLight(new Vector3D( 0.0, 2.7, -8.5), new Color( 25, 140, 255), 18));
-        scene.addLight(new PointLight(new Vector3D( 2.7, 2.2, -8.5), new Color(255, 140,  20), 12));
+        // Point lights in front of each screen — boosted so they paint the cave
+        // walls with saturated coloured light (green/blue/amber spill).
+        scene.addLight(new PointLight(new Vector3D(-2.7, 2.2, -8.5), new Color( 20, 210,  90), 28));
+        scene.addLight(new PointLight(new Vector3D( 0.0, 2.7, -8.5), new Color( 25, 140, 255), 42));
+        scene.addLight(new PointLight(new Vector3D( 2.7, 2.2, -8.5), new Color(255, 140,  20), 28));
 
         // CIRCULAR PLATFORM — bat symbol on the floor.
         // The Batmobile parks on this rotating turntable.
         Material ringMat = Material.metallic(new Color(28, 38, 52), 0.55, 100);
         ring(scene, ringMat, 0.0, 0.06, -1.0, 3.0, 4.2, 24);
-        // Blue glow from the platform
-        scene.addLight(new PointLight(new Vector3D( 0.0, 0.3, -1.0), new Color(30, 120, 255), 15));
-        scene.addLight(new PointLight(new Vector3D( 3.5, 0.3, -1.0), new Color(20,  80, 200),  8));
-        scene.addLight(new PointLight(new Vector3D(-3.5, 0.3, -1.0), new Color(20,  80, 200),  8));
+        // Blue glow from the rotating platform — brighter to cast a visible
+        // blue halo on the floor and on the underside of the Batmobile.
+        scene.addLight(new PointLight(new Vector3D( 0.0, 0.3, -1.0), new Color(30, 120, 255), 28));
+        scene.addLight(new PointLight(new Vector3D( 3.5, 0.3, -1.0), new Color(20,  80, 200), 16));
+        scene.addLight(new PointLight(new Vector3D(-3.5, 0.3, -1.0), new Color(20,  80, 200), 16));
 
         // BATMAN LOGO OBJ (platform floor)
         // Rotated 90° so it lies flat — model XY plane → world XZ plane
@@ -166,8 +169,8 @@ public class App_Scene2 {
         // Bright blue — emblem visible on the Batcave floor
         Material logoBatMat = Material.diffuse(new Color(45, 140, 255));
         batLogo.addToSceneFloor(scene, logoBatMat, logoOffset, logoScale);
-        // Blue light above the logo so it glows on the floor
-        scene.addLight(new PointLight(new Vector3D(0, 1.5,  3.8), new Color(40, 120, 255), 14));
+        // Blue light above the logo — stronger so the emblem glows on the wet floor
+        scene.addLight(new PointLight(new Vector3D(0, 1.5,  3.8), new Color(40, 120, 255), 26));
 
         // METALLIC PILLARS (Batcave corridor)
         Material pillarMat = Material.metallic(new Color(38, 44, 52), 0.45, 80);
@@ -175,11 +178,11 @@ public class App_Scene2 {
         for (double pz : new double[]{1.5, -2.5, -6.5}) {
             pillar(scene, pillarMat, -5.5, pz, 0.32, 8.0);
             pillar(scene, pillarMat,  5.5, pz, 0.32, 8.0);
-            // Teal blue accent between each pair of pillars
-            scene.addLight(new PointLight(new Vector3D(0, 2.0, pz), new Color(20, 70, 160), 7));
+            // Teal blue accent between each pair of pillars — brighter corridor atmosphere
+            scene.addLight(new PointLight(new Vector3D(0, 2.0, pz), new Color(20, 70, 160), 14));
         }
 
-        // STALACTITES
+        // STALACTITES — denser canopy for a more convincing cave ceiling
         Material stalMat = Material.diffuse(new Color(40, 36, 30));
         stalactite(scene, stalMat, -2.0, 8.0,  1.5, 5.2, 0.30);
         stalactite(scene, stalMat,  1.5, 8.0,  2.0, 4.8, 0.25);
@@ -188,6 +191,13 @@ public class App_Scene2 {
         stalactite(scene, stalMat,  2.5, 8.0, -4.5, 5.0, 0.24);
         stalactite(scene, stalMat, -5.0, 8.0, -7.0, 4.5, 0.20);
         stalactite(scene, stalMat,  4.5, 8.0, -5.5, 5.2, 0.26);
+        // Additional stalactites to fill the cave ceiling
+        stalactite(scene, stalMat,  3.2, 8.0,  0.5, 5.8, 0.18);
+        stalactite(scene, stalMat, -4.0, 8.0,  4.0, 4.6, 0.22);
+        stalactite(scene, stalMat,  0.8, 8.0, -1.5, 6.2, 0.15);
+        stalactite(scene, stalMat, -1.5, 8.0, -6.0, 5.0, 0.23);
+        stalactite(scene, stalMat,  5.5, 8.0, -2.0, 4.8, 0.17);
+        stalactite(scene, stalMat, -6.0, 8.0,  0.0, 5.5, 0.19);
 
         // BATMOBILE
         String objPath = "../models/Batmobile for Sketchfab.obj";
@@ -215,7 +225,7 @@ public class App_Scene2 {
         // Materials by usemtl group name
         Map<String, Material> batMats = new LinkedHashMap<>();
 
-        Material mBlackBody  = Material.metallic(new Color( 62,  62,  75), 0.55,  12);
+        Material mBlackBody  = Material.metallic(new Color( 62,  62,  75), 0.55,  22);
         Material mChrome     = Material.metallic(new Color(210, 210, 218), 0.88,  60);
         Material mWindscreen = new Material    (new Color( 28,  42,  70), 0.05, 0.78, 1.52, 64);
         Material mWheelRim   = Material.metallic(new Color(162, 162, 168), 0.50, 160);

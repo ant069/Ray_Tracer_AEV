@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   - Refractions with Snell's Law
  *   - Anti-aliasing 2x2 supersampling
  *   - Multi-threaded rendering (one thread per scanline)
+ *   - Post-processing: bloom, gamma correction (2.2), cinematic vignette
  */
 public class Raytracer {
     private final Scene       scene;
@@ -26,7 +27,9 @@ public class Raytracer {
         this.camera     = camera;
         this.maxBounces = Math.max(1, maxBounces);
         this.epsilon    = 1e-4;
-        this.shader     = new PhongShader(0.28, 0.22, 32);
+        // Ambient 0.10: dark night shack — lights define the scene, not ambient fill.
+        // SpecularStr 0.22: enough for metallic bucket/mirror highlights, near-zero on cloth.
+        this.shader     = new PhongShader(0.10, 0.22, 32);
     }
 
     public Raytracer(Scene scene, Camera camera) {
@@ -91,7 +94,111 @@ public class Raytracer {
         }
         pool.shutdown();
 
+        System.out.println("[Raytracer] Applying post-processing (bloom, gamma 2.2, vignette)...");
+        postProcess(img);
+
         return img;
+    }
+
+    /**
+     * Post-processing pipeline applied after the raw linear render:
+     *   1. Bloom  — warm glow halo around the brightest highlights (bare bulb, puddle)
+     *   2. Gamma  — sRGB 2.2 correction: lifts shadows, reveals blue-indigo darkness
+     *   3. Vignette — subtle edge darkening; focuses the eye on Denji and Pochita
+     */
+    private void postProcess(BufferedImage img) {
+        int w = img.getWidth(), h = img.getHeight();
+
+        // Read linear pixel values into float arrays
+        float[] rBuf = new float[w * h];
+        float[] gBuf = new float[w * h];
+        float[] bBuf = new float[w * h];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int rgb = img.getRGB(x, y);
+                rBuf[y*w+x] = ((rgb >> 16) & 0xFF) / 255f;
+                gBuf[y*w+x] = ((rgb >> 8)  & 0xFF) / 255f;
+                bBuf[y*w+x] = ( rgb        & 0xFF) / 255f;
+            }
+        }
+
+        // --- Bloom ---
+        final float BLOOM_THRESH   = 0.74f;
+        final float BLOOM_STRENGTH = 0.28f;
+        final int   bloomRadius    = Math.max(5, w / 140);
+
+        float[] br = new float[w * h];
+        float[] bg = new float[w * h];
+        float[] bb = new float[w * h];
+        for (int i = 0; i < w * h; i++) {
+            float lum = 0.299f * rBuf[i] + 0.587f * gBuf[i] + 0.114f * bBuf[i];
+            if (lum > BLOOM_THRESH) {
+                float excess = (lum - BLOOM_THRESH) / (1f - BLOOM_THRESH);
+                br[i] = rBuf[i] * excess;
+                bg[i] = gBuf[i] * excess;
+                bb[i] = bBuf[i] * excess;
+            }
+        }
+        float[] tmp = new float[w * h];
+        // Two-pass separable box blur for the bloom glow
+        boxBlurH(br, tmp, w, h, bloomRadius); System.arraycopy(tmp, 0, br, 0, w*h);
+        boxBlurH(bg, tmp, w, h, bloomRadius); System.arraycopy(tmp, 0, bg, 0, w*h);
+        boxBlurH(bb, tmp, w, h, bloomRadius); System.arraycopy(tmp, 0, bb, 0, w*h);
+        boxBlurV(br, tmp, w, h, bloomRadius); System.arraycopy(tmp, 0, br, 0, w*h);
+        boxBlurV(bg, tmp, w, h, bloomRadius); System.arraycopy(tmp, 0, bg, 0, w*h);
+        boxBlurV(bb, tmp, w, h, bloomRadius); System.arraycopy(tmp, 0, bb, 0, w*h);
+        for (int i = 0; i < w * h; i++) {
+            rBuf[i] += br[i] * BLOOM_STRENGTH;
+            gBuf[i] += bg[i] * BLOOM_STRENGTH;
+            bBuf[i] += bb[i] * BLOOM_STRENGTH;
+        }
+
+        // --- Gamma correction + Vignette ---
+        // Gamma 1.3 instead of 2.2: gentle lift that reveals blue shadow detail
+        // without washing out the indigo darkness of the shack.
+        final double INV_GAMMA = 1.0 / 1.3;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int idx = y * w + x;
+                double rv = Math.pow(Math.min(1.0, Math.max(0, rBuf[idx])), INV_GAMMA);
+                double gv = Math.pow(Math.min(1.0, Math.max(0, gBuf[idx])), INV_GAMMA);
+                double bv = Math.pow(Math.min(1.0, Math.max(0, bBuf[idx])), INV_GAMMA);
+                // Vignette: cos²-falloff from center — keeps characters bright
+                double nx  = 2.0 * x / (w - 1) - 1.0;
+                double ny  = 2.0 * y / (h - 1) - 1.0;
+                double vig = 1.0 - 0.26 * (nx * nx + ny * ny);
+                rv *= vig; gv *= vig; bv *= vig;
+                img.setRGB(x, y, new Color(
+                    clamp(rv * 255), clamp(gv * 255), clamp(bv * 255)
+                ).getRGB());
+            }
+        }
+    }
+
+    private void boxBlurH(float[] src, float[] dst, int w, int h, int r) {
+        float inv = 1f / (2 * r + 1);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                float sum = 0;
+                for (int dx = -r; dx <= r; dx++) {
+                    sum += src[y * w + Math.max(0, Math.min(w - 1, x + dx))];
+                }
+                dst[y * w + x] = sum * inv;
+            }
+        }
+    }
+
+    private void boxBlurV(float[] src, float[] dst, int w, int h, int r) {
+        float inv = 1f / (2 * r + 1);
+        for (int x = 0; x < w; x++) {
+            for (int y = 0; y < h; y++) {
+                float sum = 0;
+                for (int dy = -r; dy <= r; dy++) {
+                    sum += src[Math.max(0, Math.min(h - 1, y + dy)) * w + x];
+                }
+                dst[y * w + x] = sum * inv;
+            }
+        }
     }
 
     private Color traceRay(Ray ray, double tNear, double tFar, int depth) {

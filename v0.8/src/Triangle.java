@@ -89,4 +89,9 @@ public class Triangle extends Object3D {
     public Vector3D getV1() { return v1; }
     public Vector3D getV2() { return v2; }
     public boolean  hasVertexNormals() { return n0 != null; }
+
+    public Vector3D[] getVertices() {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'getVertices'");
+    }
 }

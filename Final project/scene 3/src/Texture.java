@@ -22,6 +22,10 @@ public class Texture {
         }
     }
 
+    public static Texture fromImage(BufferedImage img) {
+        return new Texture(img);
+    }
+
     private Texture(BufferedImage img) {
         width  = img.getWidth();
         height = img.getHeight();
